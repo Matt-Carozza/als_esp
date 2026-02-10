@@ -8,6 +8,9 @@
 #include "transport_mqtt.h"
 #include "protocol.h"
 #include "mobile_app.h"
+#include "driver/gpio.h"
+
+#define OccSensorInput_PIN (GPIO_NUM_18) // to recieve occupancy from sensor
 
 // #include "string_type.h" PROB REMOVE
 
@@ -67,7 +70,7 @@ void queue_task(void *pvParameters) {
 void status_task(void *pvParameters) {
     while (1) {
         QueueMessage msg = {
-            .origin = ORIGIN_MAIN, // TODO: REPLACE WITH YOUR DEVICE 
+            .origin = ORIGIN_OCC_SENSOR, 
             .device = DEVICE_APP,
             .app = {
                 .action = APP_STATUS,
@@ -83,6 +86,34 @@ void status_task(void *pvParameters) {
         vTaskDelay(10000 / portTICK_PERIOD_MS);
     }
 }
+
+void occ_task(void *pvParameters) {
+    
+    gpio_set_direction(OccSensorInput_PIN, GPIO_MODE_INPUT);
+
+    bool PreviousSensorStatus = 0;      
+
+    while(1){
+        int CurrentSensorStatus = gpio_get_level(OccSensorInput_PIN);
+            // if occupancy changes, then print the change
+            if (CurrentSensorStatus != PreviousSensorStatus) {
+                if (CurrentSensorStatus == 1) {
+                    printf("Occupancy status: Occupied\n");
+                    //sequenceSTEP = 54;
+                } else {
+                    printf("Occupancy status: Unoccupied\n");
+                    //sequenceSTEP = 55;
+                }
+            
+                // update previous status
+                PreviousSensorStatus = CurrentSensorStatus;
+
+            }   
+
+            vTaskDelay(pdMS_TO_TICKS(200)); // task is paused every 200 ms, to allow other tasks to be priotized
+    }
+    };
+
 
 void app_main(void)
 {
@@ -102,6 +133,7 @@ void app_main(void)
 
     xTaskCreate(queue_task, "queue_task", 4096, NULL, 5, NULL);
     xTaskCreate(status_task, "status_task", 4096, NULL, 4, NULL);
+    xTaskCreate(occ_task, "occ_task", 4096, NULL, 5, NULL);
     
     mqtt_transport_start();
 }

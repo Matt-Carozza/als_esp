@@ -4,8 +4,9 @@
 - [1. Overview](#1-overview)
 - [2. Base message format](#2-base-message-format)
 - [3. Event specifications](#3-event-specifications)
-  - [3.1 SET_RGB](#31-set_rgb)
-  - [3.2 TOGGLE_ADAPTIVE_LIGHTING_MODE](#32-toggle_adaptive_lighting_mode)
+    - [3.1 SET_RGB](#31-set_rgb)
+    - [3.2 TOGGLE_ADAPTIVE_LIGHTING_MODE](#32-toggle_adaptive_lighting_mode)
+    - [3.3 OCCUPANCY_UPDATE](#33-occupancy_update)
 - [4. Topic architecture and message flow](#4-topic-architecture-and-message-flow)
 - [5. Versioning rules](#5-versioning-rules)
 
@@ -20,6 +21,8 @@ This document defines the MQTT message format exchanged between the following sy
 - ESP32 light devices
 
 The goal is predictable, consistent communication that remains simple for embedded firmware parsing.
+
+The main controller is responsible for all autonomous lighting decisions, including adaptive lighting and occupancy-based control. The application acts as a configuration and visualization interface and is not part of the real-time control loop.
 
 ---
 
@@ -78,7 +81,9 @@ Payload is a union depending on enabled.
 | wake_time | string | when enabled | Format: HH:MM | 
 | sleep_time | string | when enabled | Format: HH:MM | 
 
-Behavior (ESP device): - If enabled is false → exit adaptive lighting mode. - If enabled is true → enter adaptive lighting mode and schedule wake_time / sleep_time. 
+Behavior (ESP device): 
+- If enabled is false → exit adaptive lighting mode. 
+- If enabled is true → enter adaptive lighting mode and schedule wake_time / sleep_time. 
 
 Example (enable):
 ```json
@@ -94,69 +99,149 @@ Example (enable):
 }
 ```
 
-Example (disable):
+--- 
+### 3.3: OCC_UPDATE
+
+Represents an occupancy state change detected by an occupancy sensor and reported to the main controller.  
+This event enables autonomous lighting control without application involvement.
+
+- **Direction:** Occupancy Sensor → Main Controller
+- **Target Device:** Main Controller
+- **Action:** `OCC_UPDATE`
+
+#### Payload fields
+
+| Field      | Type    | Required | Notes |
+|-----------|---------|----------|------|
+| occupied  | boolean | yes      | `true` = room occupied, `false` = room unoccupied |
+| room_id   | string  | yes      | Logical room identifier the sensor belongs to |
+| sensor_id | string  | no       | Optional unique ID of the reporting sensor |
+| timestamp | number  | no       | Unix timestamp (seconds); may be added by publisher or broker |
+
+#### Behavior (ESP32 Main Controller)
+
+- Upon receiving `occupied = true`:
+  - Cancel any pending vacancy timers for the associated room
+  - Mark the room as occupied in internal state
+  - MAY restore lighting state depending on configuration
+
+- Upon receiving `occupied = false`:
+  - Start (or restart) a vacancy timeout timer for the associated room
+  - If no subsequent `occupied = true` event is received before timeout expiry:
+    - Issue light control commands to turn off or dim lights in the room
+    - Update internal room occupancy state
+
+- The main controller is the **sole authority** for occupancy-based lighting behavior
+- The application MUST NOT be required for occupancy automation to function
+
+#### Messaging rules
+
+- `OCC_UPDATE` messages are **event-driven**, not periodic
+- Messages SHOULD NOT be retained
+- Duplicate `occupied` values MAY be ignored if no state transition occurs
+- QoS 1 is recommended to ensure delivery
+
+#### Example
+
 ```json
 {
-  "origin": "APP",
-  "device": "LIGHT",
-  "action": "TOGGLE_ADAPTIVE_LIGHTING_MODE",
+  "origin": "OCC",
+  "device": "MAIN",
+  "action": "OCC_UPDATE",
   "payload": {
-    "enabled": false
+    "occupied": true,
+    "room_id": "living_room",
+    "sensor_id": "occ_01",
+    "timestamp": 1700000000
   }
 }
-```
+
 ---
+
 
 ## 4. Topic architecture and message flow
 
-This system uses a centralized routing model where the ESP32 main controller acts as the authority for lighting behavior. The server publishes intent; the main controller routes and executes commands to lights.
+This system uses a **centralized routing model** in which the ESP32 main controller acts as the authority for lighting behavior.
+
+The Server / App publishes **intent** (what should happen).  
+The ESP32 main controller interprets that intent and **routes executable commands** to individual light devices.  
+ESP32 light devices execute commands and publish **status updates**.
+
+This separation ensures consistent behavior, enables room-based control, and prevents devices from bypassing system logic.
+
+---
 
 ### 4.1 Topic hierarchy
 
-Commands (downstream):
+Topics are structured to clearly encode:
 
-- `als/main/cmd`
-- `als/room/<room_id>/cmd`
-- `als/light/<light_id>/cmd`
+- Message direction (command vs status)
+- Device type
+- Room grouping
+- Optional device identity
 
-Status / events (upstream):
 
-- `als/main/status`
-- `als/room/<room_id>/status`
-- `als/light/<light_id>/status`
+```text
+als/<direction>/<device>/<room>/<device_id?>
+```
+
+Where:
+
+- `<direction>` = `cmd` or `status`
+- `<device>` = `light`, `occ_sensor`, `daylight_sensor`, etc.
+- `<room>` = logical room identifier
+- `<device_id>` = optional unique device identifier
+
+---
+
+#### Commands (downstream)
+
+```text
+als/cmd/light/<room>
+als/cmd/light/<room>/<light_id>
+```
+
+- Room-level topics target multiple devices simultaneously.
+- Device-level topics target a specific device.
+
+
+#### Status / events (upstream)
+```text
+als/status/light/<room>/<light_id>
+```
+
+- Status messages are always device-specific.
+- Status topics are never used for commands.
 
 ### 4.2 Publisher / subscriber roles
-
 
 #### Server / App
 
 Publishes:
 
 ```text
-als/main/cmd
-als/room/<room_id>/cmd
+als/cmd/light/<room>
 ```
 
 Subscribes:
 
 ```text
-als/+/+/status
+als/cmd/+/+/+
 ```
 
 #### ESP32 Main Controller
 
 Subscribes:
 
-```text
-als/main/cmd
-als/room/+/cmd
+```
+als/cmd/+/+/+
 ```
 
 Publishes:
 
 ```text
-als/light/<light_id>/cmd
-als/main/status
+als/cmd/light/<room>/<light_id>
+als/status/main/system
 ```
 
 #### ESP32 Light Devices
@@ -164,23 +249,27 @@ als/main/status
 Subscribes:
 
 ```text
-als/light/<light_id>/cmd
-als/room/<room_id>/cmd  (optional)
+als/cmd/light/<room>/<light_id>
+als/cmd/light/<room>        (optional)
 ```
 
 Publishes:
 
 ```text
-als/light/<light_id>/status
+als/status/light/<room>/<light_id>
 ```
+
+Light devices do not interpret system-wide intent and do not route messages.
 
 ### 4.3 Design rules
 
-- Lights MUST NOT subscribe to `als/main/cmd`.
+- Light devices MUST NOT subscribe to topics outside their device type.
+- Light devices MUST NOT publish to any cmd topic.
 - Topics define who receives a message.
 - Payloads define what action is performed.
-- Room-level commands allow multiple lights to be controlled simultaneously.
-- Device-level commands allow precise control when needed.
+- Room-level commands enable group control.
+- Device-level commands enable precise targeting.
+- Status topics are strictly informational and never used for control.
 
 ---
 

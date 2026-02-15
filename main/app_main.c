@@ -19,8 +19,6 @@ void status_task(void *pvParameters);
 
 static const char *TAG = "APP_MAIN";
 
-
-
 void queue_task(void *pvParameters) {
     QueueMessage msg;
     while (1) {
@@ -93,25 +91,22 @@ void occ_task(void *pvParameters) {
 
     bool PreviousSensorStatus = 0;      
 
-    while(1){
+    while(1) {
         int CurrentSensorStatus = gpio_get_level(OccSensorInput_PIN);
             // if occupancy changes, then print the change
             if (CurrentSensorStatus != PreviousSensorStatus) {
                 if (CurrentSensorStatus == 1) {
-                    printf("Occupancy status: Occupied\n");
-                    //sequenceSTEP = 54;
+                    ESP_LOGI("Occupancy status: Occupied\n");
                 } else {
-                    printf("Occupancy status: Unoccupied\n");
-                    //sequenceSTEP = 55;
+                    ESP_LOGI("Occupancy status: Unoccupied\n");
                 }
             
                 // update previous status
                 PreviousSensorStatus = CurrentSensorStatus;
-
             }   
 
-            vTaskDelay(pdMS_TO_TICKS(200)); // task is paused every 200 ms, to allow other tasks to be priotized
-    }
+            vTaskDelay(pdMS_TO_TICKS(200)); // task is paused every 200 ms, to allow other tasks to be priortized
+        }
     };
 
 

@@ -28,6 +28,85 @@ The goal is predictable, consistent communication that remains simple for embedd
 All MQTT payloads are JSON objects using this schema:
 
 ```json
+{
+  "origin": "MAIN" | "APP",
+  "device": "APP" | "LIGHT",
+  "action": "<string>",
+  "payload": { /* action-specific object */ }
+}
+```
+
+--- 
+## 3. Event specifications 
+### 3.1: SET_RGB 
+- Direction: Server → Light 
+- Device: LIGHT 
+- Action: SET_RGB 
+Payload (object): 
+
+| Field | Type | Required | Notes | 
+|---|---|---|---|
+| r | uint8 | yes | Range: 0–255 | 
+| g | uint8 | yes | Range: 0–255 | 
+| b | uint8 | yes | Range: 0–255 | 
+
+Example:
+```json
+{
+  "origin": "APP",
+  "device": "LIGHT",
+  "action": "SET_RGB",
+  "payload": {
+    "r": 255,
+    "g": 120,
+    "b": 40
+  }
+}
+```
+
+
+--- 
+### 3.2: TOGGLE_ADAPTIVE_LIGHTING_MODE 
+- Direction: Server → Light 
+- Device: LIGHT 
+- Action: TOGGLE_ADAPTIVE_LIGHTING_MODE 
+Payload is a union depending on enabled. 
+
+| Field | Type | Required | Notes | 
+|---|---|---|---|
+| enabled | boolean | yes | true = enable mode | 
+| wake_time | string | when enabled | Format: HH:MM | 
+| sleep_time | string | when enabled | Format: HH:MM | 
+
+Behavior (ESP device): - If enabled is false → exit adaptive lighting mode. - If enabled is true → enter adaptive lighting mode and schedule wake_time / sleep_time. 
+
+Example (enable):
+```json
+{
+  "origin": "APP",
+  "device": "LIGHT",
+  "action": "TOGGLE_ADAPTIVE_LIGHTING_MODE",
+  "payload": {
+    "enabled": true,
+    "wake_time": "07:30",
+    "sleep_time": "23:30"
+  }
+}
+```
+
+Example (disable):
+```json
+{
+  "origin": "APP",
+  "device": "LIGHT",
+  "action": "TOGGLE_ADAPTIVE_LIGHTING_MODE",
+  "payload": {
+    "enabled": false
+  }
+}
+```
+---
+
 ## 4. Topic architecture and message flow
 
 This system uses a centralized routing model where the ESP32 main controller acts as the authority for lighting behavior. The server publishes intent; the main controller routes and executes commands to lights.
@@ -98,49 +177,6 @@ als/light/<light_id>/status
 ### 4.3 Design rules
 
 - Lights MUST NOT subscribe to `als/main/cmd`.
-- Topics define who receives a message.
-- Payloads define what action is performed.
-- Room-level commands allow multiple lights to be controlled simultaneously.
-- Device-level commands allow precise control when needed.
-
----
-
-## 5. Versioning rules
-
-To maintain compatibility across devices and firmware versions:
-
-- Unknown fields MUST be ignored by the receiver.
-- New actions MAY be added over time.
-- Existing actions MUST NOT change their meaning.
-adaptive-lighting/main/cmd
-adaptive-lighting/room/+/cmd
-```
-
-Publishes:
-
-```text
-adaptive-lighting/light/<light_id>/cmd
-adaptive-lighting/main/status
-```
-
-#### ESP32 Light Devices
-
-Subscribes:
-
-```text
-adaptive-lighting/light/<light_id>/cmd
-adaptive-lighting/room/<room_id>/cmd  (optional)
-```
-
-Publishes:
-
-```text
-adaptive-lighting/light/<light_id>/status
-```
-
-### 4.3 Design rules
-
-- Lights MUST NOT subscribe to `adaptive-lighting/main/cmd`.
 - Topics define who receives a message.
 - Payloads define what action is performed.
 - Room-level commands allow multiple lights to be controlled simultaneously.

@@ -10,30 +10,30 @@ static QueueHandle_t message_queue;
 static const char *TAG = "ROUTER";
 
 void message_router_init(void) {
-    message_queue = xQueueCreate(10, sizeof(QueueMessage));
+    message_queue = xQueueCreate(10, sizeof(OccMessage));
 }
 
 /*
 Pushes string data to the wire
 */
-bool message_router_push_wire(const char *json) {
-    QueueMessage msg;
-    
-    if(!parse_broker_message(json, &msg)) {
-        ESP_LOGE(TAG, "Parse Failed");
-        return false;
-    }
+// bool message_router_push_wire(const char *json) {
+//     OccMessage msg;
+//     
+//     if(!parse_broker_message(json, &msg)) {
+//         ESP_LOGE(TAG, "Parse Failed");
+//         return false;
+//     }
 
-    return xQueueSend(message_queue, &msg, portMAX_DELAY);
-}
+//     return xQueueSend(message_queue, &msg, portMAX_DELAY);
+// }
 
 /*
-Pushes QueueMessage struct data to the wire
+Pushes OccMessage struct data to the wire
 */
-bool message_router_push_local(QueueMessage* msg) {
+bool message_router_push_local(const OccMessage* msg) {
     return xQueueSend(message_queue, msg, 0);
-
 }
-bool message_router_receive(QueueMessage* msg) {
+
+bool message_router_receive(OccMessage* msg) {
    return xQueueReceive(message_queue, msg, portMAX_DELAY); 
 }

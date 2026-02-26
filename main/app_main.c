@@ -7,43 +7,23 @@
 #include "message_router.h"
 #include "transport_mqtt.h"
 #include "protocol.h"
-#include "mobile_app.h"
+#include "occupancy.h"
+#include "driver/gpio.h"
+
+#define OccSensorInput_PIN (GPIO_NUM_18) // to recieve occupancy from sensor
 
 // #include "string_type.h" PROB REMOVE
 
 void queue_task(void *pvParameters);
-void status_task(void *pvParameters);
+void heartbeat_task(void *pvParameters);
 
 static const char *TAG = "APP_MAIN";
 
-
-
 void queue_task(void *pvParameters) {
-    QueueMessage msg;
+    OccMessage msg;
     while (1) {
         if (message_router_receive(&msg) == pdPASS) {
-            switch (msg.device) {
-
-                case DEVICE_MAIN:
-                    break;
-                case DEVICE_APP:
-                    mobile_app_handle(&msg);
-                    break;
-                case DEVICE_LIGHT:
-                    // Check mqtt_transport.c to see how to go from wireless broker data --> queue task
-                    uint8_t r = msg.light.payload.r;
-                    uint8_t g = msg.light.payload.g;
-                    uint8_t b = msg.light.payload.b;
-                    ESP_LOGI(TAG, "%u %u %u", r, g, b);
-                    break;
-                case DEVICE_OCC_SENSOR:
-                    break;
-                case DEVICE_DAYLIGHT_SENSOR:
-                    break;
-                case DEVICE_UNKNOWN:
-                    ESP_LOGE(TAG, "ERROR During Queue: Device Unknown");
-                    break;
-            }
+            occupancy_handle(&msg);
         }
     } 
 }
@@ -64,14 +44,14 @@ void queue_task(void *pvParameters) {
     6. The output created from serialization is then called within,
     mqtt_transport_publish which will finally publish the data to the broker
 */
-void status_task(void *pvParameters) {
+void heartbeat_task(void *pvParameters) {
     while (1) {
-        QueueMessage msg = {
-            .origin = ORIGIN_MAIN, // TODO: REPLACE WITH YOUR DEVICE 
-            .device = DEVICE_APP,
-            .app = {
-                .action = APP_STATUS,
-                .payload = {
+        OccMessage msg = {
+            .origin = ORIGIN_OCC_SENSOR, 
+            .device = DEVICE_MAIN,
+            .action = HEARTBEAT_UPDATE,
+            .payload = {
+                .heartbeat_update = {
                     .connected_to_broker = mqtt_transport_is_connected(),
                 }
             }
@@ -80,9 +60,48 @@ void status_task(void *pvParameters) {
         if (message_router_push_local(&msg) != pdPASS) { 
             ESP_LOGE("STATUS_TASK", "Failed to send message to queue");
         } 
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        vTaskDelay(60000 / portTICK_PERIOD_MS);
     }
 }
+
+void occ_task(void *pvParameters) {
+    
+    gpio_set_direction(OccSensorInput_PIN, GPIO_MODE_INPUT);
+
+    bool previous_sensor_status = 0;      
+
+    while(1) {
+        int current_sensor_status = gpio_get_level(OccSensorInput_PIN);
+        OccMessage msg;
+        // if occupancy changes, then print the change
+        if (current_sensor_status != previous_sensor_status) {
+            msg = (OccMessage) {
+                .origin = ORIGIN_OCC_SENSOR,
+                .device = DEVICE_MAIN,
+                .action = OCC_UPDATE,
+                .payload = {
+                    .occ_update = {
+                        .occupied = current_sensor_status == 1,
+                        .room_id = 1,
+                    }
+                }
+            };
+            if (current_sensor_status == 1) {
+                ESP_LOGI("OCC_TASK", "Room is now occupied");
+            } else {
+                ESP_LOGI("OCC_TASK", "Room is now unoccupied");
+            }
+            if (message_router_push_local(&msg) != pdPASS) { 
+                ESP_LOGE("OCC_TASK", "Failed to send message to queue");
+            } 
+            // update previous status
+            previous_sensor_status = current_sensor_status;
+        }   
+
+        vTaskDelay(pdMS_TO_TICKS(200)); // task is paused every 200 ms, to allow other tasks to be priortized
+    }
+};
+
 
 void app_main(void)
 {
@@ -101,7 +120,8 @@ void app_main(void)
     message_router_init();
 
     xTaskCreate(queue_task, "queue_task", 4096, NULL, 5, NULL);
-    xTaskCreate(status_task, "status_task", 4096, NULL, 4, NULL);
+    xTaskCreate(heartbeat_task, "status_task", 4096, NULL, 4, NULL);
+    xTaskCreate(occ_task, "occ_task", 4096, NULL, 5, NULL);
     
     mqtt_transport_start();
 }

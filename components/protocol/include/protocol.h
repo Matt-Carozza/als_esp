@@ -25,56 +25,44 @@ typedef enum {
 } DeviceType;
 
 typedef enum {
-    APP_STATUS,
-} AppAction;
-
-typedef enum {
-    LIGHT_SET,
-    LIGHT_UNKNOWN 
-} LightAction;
+    HEARTBEAT_UPDATE,
+    OCC_UPDATE,
+    OCC_ACTION_UNKNOWN
+} OccAction;
 
 typedef struct {
-    uint8_t r;
-    uint8_t g;
-    uint8_t b;
-} LightPayload;
-
-typedef struct {
-    bool connected_to_broker;
-} AppPayload;
+    union {
+        struct {
+            bool occupied; 
+            uint8_t room_id; 
+        } occ_update;
+        bool occupied; 
+        struct {
+            bool connected_to_broker; 
+        } heartbeat_update;
+    };
+} OccPayload;
 
 typedef struct {
     MessageOrigin origin;
     DeviceType device;
-    
-    union {
-       struct {
-           AppAction action;
-           AppPayload payload;
-       } app;
-       struct {
-           LightAction action;
-           LightPayload payload;
-       } light;
-       // Main Control Action / Payload
-    };
-} QueueMessage;
-
+    OccAction action;
+    OccPayload payload;
+} OccMessage;
 
 /*
     Parsers
 */
 
-bool parse_broker_message(const char* json, QueueMessage *msg);
-bool parse_app_message(cJSON *root, QueueMessage *msg); // Unfinished
-bool parse_light_message(cJSON *root, QueueMessage *msg);
-bool parse_light_set(cJSON *root, QueueMessage *out);
+// bool parse_broker_message(const char* json, OccMessage *msg);
+// bool parse_app_message(cJSON *root, OccMessage *msg); // Unfinished
+// bool parse_light_message(cJSON *root, OccMessage *msg);
 
 /*
     serializers 
 */
 
-bool serialize_message(const QueueMessage *msg, char* out, size_t out_len);
+bool occ_serialize_message(const OccMessage *msg, char* out, size_t out_len);
 
 /*
     Turns keys (string) found within JSON objects into corresponding enums
@@ -82,7 +70,7 @@ bool serialize_message(const QueueMessage *msg, char* out, size_t out_len);
 
 MessageOrigin origin_from_string(const char *s);
 DeviceType device_from_string(const char *s);
-LightAction light_action_from_string(const char *s);
+OccAction occ_action_from_string(const char *s);
 
 /*
     Turns enumerations found within QueueMessage struct into corresponding strings
@@ -90,4 +78,4 @@ LightAction light_action_from_string(const char *s);
 
 const char* origin_to_string(MessageOrigin origin);
 const char* device_to_string(DeviceType device);
-const char* app_action_to_string(LightAction light_action);
+const char* occ_action_to_string(OccAction occ_action);

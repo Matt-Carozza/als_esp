@@ -4,110 +4,120 @@
 
 static const char *TAG = "PROTOCOL";
 
-static bool get_string_ref(cJSON *obj, const char *key, const char** out);
+static void serialize_app(cJSON* root, const QueueMessage *msg);
+
+static bool get_string(cJSON *obj, const char *key, const char** out);
 static bool get_u8(cJSON *obj, const char* key, uint8_t *out);
 
-// bool parse_broker_message(const char* json, OccMessage *out) {
-//     if (!out) return false;
 
-//     cJSON *root = cJSON_Parse(json);
-//    
-//     const char *device_from_message, *origin, *action_from_message;
+bool parse_broker_message(const char* json, QueueMessage *out) {
+    if (!out) return false;
 
-//     bool ok = false;
-
-//     if (!root) goto fail;
-
-//     if (!get_string_ref(root, "origin", &origin)) goto fail;
-//     if (!get_string_ref(root, "device", &device_from_message)) goto fail;
-//     if (!get_string_ref(root, "action", &action_from_message)) goto fail;
-//     
-//     out->origin = origin_from_string(origin);
-//     out->device = device_from_string(device_from_message);
-//     out->action = occ_action_from_string(action_from_message);
-//     
-//     if (out->device != DEVICE_OCC_SENSOR) {
-//         ESP_LOGI(TAG, "Wrong Device Type: %s", device_from_message);
-//         goto fail;
-//     }
-//     
-//     switch (out->device)
-//     {
-//         case DEVICE_APP:
-//             /* code */
-//             break;
-//         case DEVICE_LIGHT:
-//             ok = parse_light_message(root, out);
-//             /* code */
-//             break;
-//         case DEVICE_OCC_SENSOR:
-//             /* code */
-//             break;
-//         case DEVICE_UNKNOWN:
-//             ESP_LOGI(TAG, "Unknown Device Type: %s", device_from_message);
-//             break;
-//         default:
-//             break;
-//     }
-//     
-// fail:
-//     if (root) cJSON_Delete(root);
-//     return ok;
-// }
-
-
-// bool parse_app_message(cJSON *root, QueueMessage *out) {
-//     // Code here
-//     bool ok = false;
-//     return ok;
-// }
-
-bool occ_serialize_message(const OccMessage *msg, char* out, size_t out_len) {
-    if (!msg || !out || out_len == 0) return false;
-    cJSON *root = cJSON_CreateObject();
-    
-    if (!cJSON_AddStringToObject(root, "origin", 
-            origin_to_string(msg->origin))  ||
-        !cJSON_AddStringToObject(root, "device", 
-            device_to_string(msg->device)) ||
-        !cJSON_AddStringToObject(root, "action",
-            occ_action_to_string(msg->action))) {
-        cJSON_Delete(root);
-        return false;
-    }
-
-    cJSON *payload = cJSON_CreateObject();
-    if (!payload) {
-        cJSON_Delete(root);
-        return false;
-    }
+    cJSON *root = cJSON_Parse(json);
+   
+    const char *device_from_message, *origin;
 
     bool ok = false;
 
-    switch (msg->action)
+    if (!root) goto fail;
+
+    if (!get_string(root, "origin", &origin)) goto fail;
+    if (!get_string(root, "device", &device_from_message)) goto fail;
+    
+    out->origin = origin_from_string(origin);
+    out->device = device_from_string(device_from_message);
+    
+    switch (out->device)
     {
-        case HEARTBEAT_UPDATE:
-            ok = cJSON_AddBoolToObject(payload, "connected_to_broker", 
-                                       msg->payload.heartbeat_update.connected_to_broker);
+        case DEVICE_APP:
+            /* code */
             break;
-        case OCC_UPDATE:
-            ok = cJSON_AddBoolToObject(payload, "occupied", 
-                                       msg->payload.occ_update.occupied)&&
-                 cJSON_AddNumberToObject(payload, "room_id", 
-                                       msg->payload.occ_update.room_id);
+        case DEVICE_LIGHT:
+            ok = parse_light_message(root, out);
+            /* code */
             break;
+        case DEVICE_OCC_SENSOR:
+            /* code */
+            break;
+        case DEVICE_UNKNOWN:
+            ESP_LOGI(TAG, "Unknown Device Type: %s", device_from_message);
+            break;
+        default:
+            break;
+    }
+    
+fail:
+    if (root) cJSON_Delete(root);
+    return ok;
+}
+
+
+bool parse_app_message(cJSON *root, QueueMessage *out) {
+    // Code here
+    bool ok = false;
+    return ok;
+}
+
+bool parse_light_message(cJSON *root, QueueMessage *out) {
+    const char *action;
+    if(!get_string(root, "action", &action)) return false;
+    
+    out->light.action = light_action_from_string(action);
+    
+    switch (out->light.action)
+    {
+        case LIGHT_SET:
+            /* code */
+            return parse_light_set(root, out); 
+            break;
+        case LIGHT_UNKNOWN:
+            ESP_LOGI(TAG, "Unknown light action: %s", action);
+            return false;
+            break;
+        default:
+            ESP_LOGI(TAG, "Unknown light action: %s", action);
+            return false;
+            break;
+    }
+}
+
+bool parse_light_set(cJSON *root, QueueMessage *out) {
+    cJSON *payload = cJSON_GetObjectItem(root, "payload");
+    if(!cJSON_IsObject(payload)) return false;
+
+    return get_u8(payload, "r", &out->light.payload.r)
+        && get_u8(payload, "g", &out->light.payload.g)
+        && get_u8(payload, "b", &out->light.payload.b);
+        
+    return true;
+}
+
+bool serialize_message(const QueueMessage *msg, char* out, size_t out_len) {
+    cJSON *root = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(root, "origin", 
+                            origin_to_string(msg->origin));
+    cJSON_AddStringToObject(root, "device", 
+                            device_to_string(msg->device));
+    
+    switch (msg->device)
+    {
+        case DEVICE_MAIN:
+            break;
+        case DEVICE_APP:
+            serialize_app(root, msg);
+            break;
+        case DEVICE_LIGHT:
+            break;
+        case DEVICE_OCC_SENSOR:
+            break;
+        case DEVICE_UNKNOWN:
+            cJSON_Delete(root);
+            return false;
         default:
             cJSON_Delete(root);
             return false;
     }
-    
-    if (!ok) {
-        cJSON_Delete(payload);
-        cJSON_Delete(root);
-        return false;
-    }
-    
-    cJSON_AddItemToObject(root, "payload", payload);
     
     char *tmp = cJSON_PrintUnformatted(root);
 
@@ -121,7 +131,19 @@ bool occ_serialize_message(const OccMessage *msg, char* out, size_t out_len) {
     
     free(tmp);
     cJSON_Delete(root);
+    
     return true;
+}
+
+static void serialize_app(cJSON* root, const QueueMessage *msg) {
+    cJSON_AddStringToObject(root, "action",
+                            app_action_to_string(msg->app.action)); 
+
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddBoolToObject(payload, "connected_to_broker",
+                          msg->app.payload.connected_to_broker);
+    
+    cJSON_AddItemToObject(root, "payload", payload);
 }
 
 MessageOrigin origin_from_string(const char *s) {
@@ -142,10 +164,9 @@ DeviceType device_from_string(const char *s) {
     return DEVICE_UNKNOWN;
 }
 
-OccAction occ_action_from_string(const char *s) {
-    if (!strcmp(s, "OCC_UPDATE")) return OCC_UPDATE;
-    if (!strcmp(s, "HEARTBEAT_UPDATE")) return HEARTBEAT_UPDATE;
-    return OCC_ACTION_UNKNOWN;
+LightAction light_action_from_string(const char *s) {
+    if (!strcmp(s, "SET")) return LIGHT_SET;
+    return LIGHT_UNKNOWN;
 }
 
 const char* origin_to_string(MessageOrigin origin) {
@@ -164,7 +185,7 @@ const char* origin_to_string(MessageOrigin origin) {
         case ORIGIN_UKNOWN:
             return "UNKNOWN";
         default:
-            return NULL;
+            return "UNKNOWN";
     }
 }
 const char* device_to_string(DeviceType device) {
@@ -183,23 +204,21 @@ const char* device_to_string(DeviceType device) {
         case DEVICE_UNKNOWN:
             return "UNKNOWN";
         default:
-            return NULL;
+            return "UNKNOWN";
     }
 }
 
-const char* occ_action_to_string(OccAction occ_action) {
-    switch (occ_action)
+const char* app_action_to_string(LightAction light_action) {
+    switch (light_action)
     {
-        case OCC_UPDATE:
-            return "OCC_UPDATE";
-        case HEARTBEAT_UPDATE:
-            return "HEARTBEAT_UPDATE";
+        case APP_STATUS:
+            return "STATUS";
         default:
-            return NULL;
+            return "UNKNOWN";
     }
 }
 
-static bool get_string_ref(cJSON *obj, const char *key, const char** out) {
+static bool get_string(cJSON *obj, const char *key, const char** out) {
     cJSON *item = cJSON_GetObjectItem(obj, key);
     if (!cJSON_IsString(item)) return false;
     *out = item->valuestring;
@@ -215,13 +234,4 @@ static bool get_u8(cJSON *obj, const char* key, uint8_t *out) {
    
    *out = (uint8_t)v;
    return true;
-}
-
-static bool get_bool(cJSON *obj, const char* key, bool *out) {
-    cJSON *item = cJSON_GetObjectItem(obj, key);
-    if (!cJSON_IsBool(item)) return false;
-    
-    bool b = item->valueint;
-    *out = b;
-    return true;
 }

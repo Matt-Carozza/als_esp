@@ -58,7 +58,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         // TODO: Subscribe to topics by changing "/topicName" that your device needs 
         // to subscribe to (Discuss what you want to call the topic when syncing up devices)
-        esp_mqtt_client_subscribe(client, "/als/occ", 1);
+        esp_mqtt_client_subscribe(client, "/topicName", 1);
         
         break;
     case MQTT_EVENT_DISCONNECTED:
@@ -90,7 +90,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             This is where you might put stuff such as your subsystem demo logic
         */
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        // message_router_push_wire(event_info->data);
+        message_router_push_wire(event_info->data);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");

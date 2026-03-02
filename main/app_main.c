@@ -1,14 +1,22 @@
+#include <string.h>
+#include "sdkconfig.h"
+#include "esp_log.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include "nvs_flash.h"
 #include "esp_event.h"
 #include "protocol_examples_common.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
+#include "esp_sleep.h"
 
 #include "message_router.h"
 #include "transport_mqtt.h"
 #include "protocol.h"
 #include "mobile_app.h"
-
+#define Daylight_PIN 2
 // #include "string_type.h" PROB REMOVE
 
 void queue_task(void *pvParameters);
@@ -67,7 +75,7 @@ void queue_task(void *pvParameters) {
 void status_task(void *pvParameters) {
     while (1) {
         QueueMessage msg = {
-            .origin = ORIGIN_MAIN, // TODO: REPLACE WITH YOUR DEVICE 
+            .origin = ORIGIN_DAYLIGHT_SENSOR, 
             .device = DEVICE_APP,
             .app = {
                 .action = APP_STATUS,
@@ -84,9 +92,54 @@ void status_task(void *pvParameters) {
     }
 }
 
+RTC_DATA_ATTR size_t counter = 0; //A value that carries over during deep sleeps GLOBAL
+
 void app_main(void)
 {
+    const int wakeup_time_sec = 10;
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
     ESP_LOGI(TAG, "[APP] Startup..");
+
+    // Configure GPIO
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << Daylight_PIN),     // Select GPIO 2
+        .mode = GPIO_MODE_OUTPUT,              // Set as output
+        .pull_up_en = GPIO_PULLUP_DISABLE,     // Disable pull-up
+        .pull_down_en = GPIO_PULLDOWN_DISABLE, // Disable pull-down
+        .intr_type = GPIO_INTR_DISABLE         // Disable interrupts
+    };
+    gpio_config(&io_conf);
+
+    static esp_adc_cal_characteristics_t adc2_chars;
+    esp_adc_cal_characterize(ADC_UNIT_2, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_DEFAULT, 0, &adc2_chars);
+    //adc1_config_width(ADC_WIDTH_BIT_DEFAULT);
+    adc2_config_channel_atten(ADC2_CHANNEL_8, ADC_ATTEN_DB_12);
+    uint32_t voltage;
+    int adc_value = 0;
+    
+
+    // Turn Sensor On
+    printf("Daylight Sensor ON\n");
+    gpio_set_level(Daylight_PIN, 1);
+    vTaskDelay(500 / portTICK_PERIOD_MS); // Delay half second
+        
+    //Read Daylight voltage value
+    adc2_get_raw(ADC2_CHANNEL_8, ADC_WIDTH_BIT_DEFAULT,&adc_value);
+    voltage = esp_adc_cal_raw_to_voltage(adc_value, &adc2_chars);
+    printf("Voltage: %ld mV", voltage);
+    printf("\n");
+
+    //Turn Sensor Off
+    printf("Daylight Sensor OFF\n");
+    gpio_set_level(Daylight_PIN, 0);
+
+    counter++; 
+    if (counter < 6){
+        printf("Entering deep sleep for %d seconds\n", wakeup_time_sec);
+        esp_deep_sleep_start();
+    }
+    counter = 0;
+    
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
@@ -102,6 +155,6 @@ void app_main(void)
 
     xTaskCreate(queue_task, "queue_task", 4096, NULL, 5, NULL);
     xTaskCreate(status_task, "status_task", 4096, NULL, 4, NULL);
-    
+
     mqtt_transport_start();
 }

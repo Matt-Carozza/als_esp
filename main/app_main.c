@@ -15,43 +15,84 @@
 #include "message_router.h"
 #include "transport_mqtt.h"
 #include "protocol.h"
-#include "mobile_app.h"
+#include "daylight.h"
 #define Daylight_PIN 2
-// #include "string_type.h" PROB REMOVE
 
 void queue_task(void *pvParameters);
-void status_task(void *pvParameters);
+void heartbeat_task(void *pvParameters);
 
 static const char *TAG = "APP_MAIN";
+TaskHandle_t app_main_task_handle = NULL; // Pass data between tasks
+static esp_adc_cal_characteristics_t adc2_chars;
+RTC_DATA_ATTR size_t counter = 0; // Carries through deep sleep
 
+static void init_sleep_timer(void) {
+    const int wakeup_time_sec = 10;
+    ESP_ERROR_CHECK(
+        esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000)
+    );
+}
 
+static void init_sensor_gpio(void) {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << Daylight_PIN), // Select GPIO 2
+        .mode = GPIO_MODE_OUTPUT,               // Set as output
+        .pull_up_en = GPIO_PULLUP_DISABLE,      // Disable pull-up
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,  // Disable pull-down
+        .intr_type = GPIO_INTR_DISABLE          // Disable interrupts
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+}
+
+static void init_sensor_adc(void) {
+
+    esp_adc_cal_characterize(ADC_UNIT_2, 
+        ADC_ATTEN_DB_12, 
+        ADC_WIDTH_BIT_DEFAULT, 
+        0, 
+        &adc2_chars
+    );
+
+    adc2_config_channel_atten(ADC2_CHANNEL_8, ADC_ATTEN_DB_12);
+}
+
+static uint32_t read_daylight_voltage(void) {
+    uint32_t voltage;
+    int adc_value = 0;
+
+    // Turn Sensor On
+    ESP_LOGD(TAG, "Daylight Sensor ON\n");
+    gpio_set_level(Daylight_PIN, 1);
+    vTaskDelay(500 / portTICK_PERIOD_MS); // Delay half second
+        
+    //Read Daylight voltage value
+    adc2_get_raw(ADC2_CHANNEL_8, ADC_WIDTH_BIT_DEFAULT,&adc_value);
+    voltage = esp_adc_cal_raw_to_voltage(adc_value, &adc2_chars);
+    ESP_LOGI(TAG, "Daylight Voltage: %ld mV", voltage);
+
+    //Turn Sensor Off
+    ESP_LOGD(TAG, "Daylight Sensor OFF\n");
+    gpio_set_level(Daylight_PIN, 0);
+
+    return voltage;
+}
+
+static bool should_init_wifi(uint32_t voltage) {
+    counter++;
+
+    if (counter < 6) {
+        return false;
+    }
+    
+    counter = 0;
+    return true;
+}
 
 void queue_task(void *pvParameters) {
-    QueueMessage msg;
+    DayMessage msg;
     while (1) {
         if (message_router_receive(&msg) == pdPASS) {
-            switch (msg.device) {
-
-                case DEVICE_MAIN:
-                    break;
-                case DEVICE_APP:
-                    mobile_app_handle(&msg);
-                    break;
-                case DEVICE_LIGHT:
-                    // Check mqtt_transport.c to see how to go from wireless broker data --> queue task
-                    uint8_t r = msg.light.payload.r;
-                    uint8_t g = msg.light.payload.g;
-                    uint8_t b = msg.light.payload.b;
-                    ESP_LOGI(TAG, "%u %u %u", r, g, b);
-                    break;
-                case DEVICE_OCC_SENSOR:
-                    break;
-                case DEVICE_DAYLIGHT_SENSOR:
-                    break;
-                case DEVICE_UNKNOWN:
-                    ESP_LOGE(TAG, "ERROR During Queue: Device Unknown");
-                    break;
-            }
+            daylight_handle(&msg);
         }
     } 
 }
@@ -72,73 +113,39 @@ void queue_task(void *pvParameters) {
     6. The output created from serialization is then called within,
     mqtt_transport_publish which will finally publish the data to the broker
 */
-void status_task(void *pvParameters) {
+void heartbeat_task(void *pvParameters) {
     while (1) {
-        QueueMessage msg = {
+        DayMessage msg = {
             .origin = ORIGIN_DAYLIGHT_SENSOR, 
-            .device = DEVICE_APP,
-            .app = {
-                .action = APP_STATUS,
-                .payload = {
-                    .connected_to_broker = mqtt_transport_is_connected(),
-                }
+            .device = DEVICE_MAIN,
+            .action = HEARTBEAT_UPDATE,
+            .payload.heartbeat_update = {
+                .connected_to_broker = mqtt_transport_is_connected(),
             }
         };
 
         if (message_router_push_local(&msg) != pdPASS) { 
             ESP_LOGE("STATUS_TASK", "Failed to send message to queue");
         } 
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        vTaskDelay(60000 / portTICK_PERIOD_MS);
     }
 }
 
-RTC_DATA_ATTR size_t counter = 0; //A value that carries over during deep sleeps GLOBAL
-
 void app_main(void)
 {
-    const int wakeup_time_sec = 10;
-    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000));
+    app_main_task_handle = xTaskGetCurrentTaskHandle();
     ESP_LOGI(TAG, "[APP] Startup..");
 
-    // Configure GPIO
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << Daylight_PIN),     // Select GPIO 2
-        .mode = GPIO_MODE_OUTPUT,              // Set as output
-        .pull_up_en = GPIO_PULLUP_DISABLE,     // Disable pull-up
-        .pull_down_en = GPIO_PULLDOWN_DISABLE, // Disable pull-down
-        .intr_type = GPIO_INTR_DISABLE         // Disable interrupts
-    };
-    gpio_config(&io_conf);
-
-    static esp_adc_cal_characteristics_t adc2_chars;
-    esp_adc_cal_characterize(ADC_UNIT_2, ADC_ATTEN_DB_12, ADC_WIDTH_BIT_DEFAULT, 0, &adc2_chars);
-    //adc1_config_width(ADC_WIDTH_BIT_DEFAULT);
-    adc2_config_channel_atten(ADC2_CHANNEL_8, ADC_ATTEN_DB_12);
-    uint32_t voltage;
-    int adc_value = 0;
+    init_sleep_timer();
+    init_sensor_gpio();
+    init_sensor_adc();
     
+    uint32_t voltage = read_daylight_voltage();
 
-    // Turn Sensor On
-    printf("Daylight Sensor ON\n");
-    gpio_set_level(Daylight_PIN, 1);
-    vTaskDelay(500 / portTICK_PERIOD_MS); // Delay half second
-        
-    //Read Daylight voltage value
-    adc2_get_raw(ADC2_CHANNEL_8, ADC_WIDTH_BIT_DEFAULT,&adc_value);
-    voltage = esp_adc_cal_raw_to_voltage(adc_value, &adc2_chars);
-    printf("Voltage: %ld mV", voltage);
-    printf("\n");
-
-    //Turn Sensor Off
-    printf("Daylight Sensor OFF\n");
-    gpio_set_level(Daylight_PIN, 0);
-
-    counter++; 
-    if (counter < 6){
-        printf("Entering deep sleep for %d seconds\n", wakeup_time_sec);
+    if (!should_init_wifi(voltage)) {
+        ESP_LOGI(TAG, "Entering deep sleep...");
         esp_deep_sleep_start();
     }
-    counter = 0;
     
 
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -154,7 +161,24 @@ void app_main(void)
     message_router_init();
 
     xTaskCreate(queue_task, "queue_task", 4096, NULL, 5, NULL);
-    xTaskCreate(status_task, "status_task", 4096, NULL, 4, NULL);
-
+    // xTaskCreate(heartbeat_task, "heartbeat_task", 4096, NULL, 4, NULL);
+    
     mqtt_transport_start();
+    mqtt_transport_set_app_task(app_main_task_handle);
+
+    DayMessage msg = {
+        .origin = ORIGIN_DAYLIGHT_SENSOR,
+        .device = ORIGIN_MAIN,
+        .action = DAY_UPDATE,
+        .payload.day_update = {
+            .room_id = 1,
+            .voltage = voltage
+        }
+    };
+    
+    message_router_push_local(&msg);
+    
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+    esp_deep_sleep_start();
 }

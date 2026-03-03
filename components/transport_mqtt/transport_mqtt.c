@@ -12,6 +12,7 @@
 esp_mqtt_client_handle_t client;
 static const char *TAG = "MQTT";
 static bool mqtt_connected = false;
+static TaskHandle_t s_app_main_task_handle = NULL;
 
 
 static void mqtt_app_start(void);
@@ -31,6 +32,10 @@ int mqtt_transport_publish(const char* topic, const char* payload) {
     return esp_mqtt_client_publish(client, 
         topic, 
         payload, 0, 1, 0);
+}
+
+void mqtt_transport_set_app_task(TaskHandle_t handle) {
+    s_app_main_task_handle = handle;
 }
 
 /*
@@ -58,7 +63,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         // TODO: Subscribe to topics by changing "/topicName" that your device needs 
         // to subscribe to (Discuss what you want to call the topic when syncing up devices)
-        esp_mqtt_client_subscribe(client, "/topicName", 1);
+        esp_mqtt_client_subscribe(client, "/als/day", 1);
         
         break;
     case MQTT_EVENT_DISCONNECTED:
@@ -74,6 +79,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_PUBLISHED:
         ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event_info->msg_id);
+        if (s_app_main_task_handle != NULL) {
+            xTaskNotifyGive(s_app_main_task_handle);
+        }
         break;
     case MQTT_EVENT_DATA:
         /*
@@ -90,7 +98,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             This is where you might put stuff such as your subsystem demo logic
         */
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        message_router_push_wire(event_info->data);
+        // message_router_push_wire(event_info->data);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");

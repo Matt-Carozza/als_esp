@@ -1,3 +1,3 @@
 idf_component_register(SRCS "app_main.c"
-                    PRIV_REQUIRES mqtt nvs_flash esp_netif message_router transport_mqtt protocol mobile_app driver esp_adc
+                    PRIV_REQUIRES mqtt nvs_flash esp_netif message_router transport_mqtt protocol driver esp_adc daylight
                  INCLUDE_DIRS "include")

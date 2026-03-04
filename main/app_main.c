@@ -16,7 +16,10 @@
 #include "transport_mqtt.h"
 #include "protocol.h"
 #include "daylight.h"
-#define Daylight_PIN 2
+#include "daylight_buffer.h"
+
+#define DAYLIGHT_PIN 2
+#define THRESHOLD_VOLTAGE (uint32_t) 200U
 
 void queue_task(void *pvParameters);
 void heartbeat_task(void *pvParameters);
@@ -25,6 +28,7 @@ static const char *TAG = "APP_MAIN";
 TaskHandle_t app_main_task_handle = NULL; // Pass data between tasks
 static esp_adc_cal_characteristics_t adc2_chars;
 RTC_DATA_ATTR size_t counter = 0; // Carries through deep sleep
+RTC_DATA_ATTR uint32_t previous_voltage_sent = 150; // Start value on minimum read voltage
 
 static void init_sleep_timer(void) {
     const int wakeup_time_sec = 10;
@@ -35,7 +39,7 @@ static void init_sleep_timer(void) {
 
 static void init_sensor_gpio(void) {
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << Daylight_PIN), // Select GPIO 2
+        .pin_bit_mask = (1ULL << DAYLIGHT_PIN), // Select GPIO 2
         .mode = GPIO_MODE_OUTPUT,               // Set as output
         .pull_up_en = GPIO_PULLUP_DISABLE,      // Disable pull-up
         .pull_down_en = GPIO_PULLDOWN_DISABLE,  // Disable pull-down
@@ -62,29 +66,34 @@ static uint32_t read_daylight_voltage(void) {
 
     // Turn Sensor On
     ESP_LOGD(TAG, "Daylight Sensor ON\n");
-    gpio_set_level(Daylight_PIN, 1);
+    gpio_set_level(DAYLIGHT_PIN, 1);
     vTaskDelay(500 / portTICK_PERIOD_MS); // Delay half second
         
     //Read Daylight voltage value
     adc2_get_raw(ADC2_CHANNEL_8, ADC_WIDTH_BIT_DEFAULT,&adc_value);
     voltage = esp_adc_cal_raw_to_voltage(adc_value, &adc2_chars);
-    ESP_LOGI(TAG, "Daylight Voltage: %ld mV", voltage);
+    ESP_LOGI(TAG, "Sampled Voltage: %ld mV", voltage);
 
     //Turn Sensor Off
     ESP_LOGD(TAG, "Daylight Sensor OFF\n");
-    gpio_set_level(Daylight_PIN, 0);
+    gpio_set_level(DAYLIGHT_PIN, 0);
 
     return voltage;
 }
 
-static bool should_init_wifi(uint32_t voltage) {
-    counter++;
-
-    if (counter < 6) {
-        return false;
-    }
+static bool should_init_wifi(uint32_t average_voltage) {
     
-    counter = 0;
+    ESP_LOGI(TAG, "Buffer Average: %u mV", average_voltage);
+    ESP_LOGI(TAG, "Previous Sent: %u mV", previous_voltage_sent);
+    
+    uint32_t abs_voltage_diff = (previous_voltage_sent > average_voltage) 
+                                    ? (previous_voltage_sent - average_voltage)
+                                    : (average_voltage - previous_voltage_sent);
+
+
+    if (daylight_buffer_get_count() < 6 || abs_voltage_diff < THRESHOLD_VOLTAGE)
+        return false;
+
     return true;
 }
 
@@ -141,8 +150,12 @@ void app_main(void)
     init_sensor_adc();
     
     uint32_t voltage = read_daylight_voltage();
+    
+    daylight_buffer_append(voltage);
+    
+    uint32_t average_voltage = daylight_buffer_average();
 
-    if (!should_init_wifi(voltage)) {
+    if (!should_init_wifi(average_voltage)) {
         ESP_LOGI(TAG, "Entering deep sleep...");
         esp_deep_sleep_start();
     }
@@ -172,13 +185,19 @@ void app_main(void)
         .action = DAY_UPDATE,
         .payload.day_update = {
             .room_id = 1,
-            .voltage = voltage
+            .voltage = average_voltage 
         }
     };
     
     message_router_push_local(&msg);
     
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    bool published = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(30000)) > 0; // Value zero on timeout
 
+    if (published) {
+        previous_voltage_sent = average_voltage;
+    } else {
+        ESP_LOGW(TAG, "Timeout on publish attempt");
+    }
+    
     esp_deep_sleep_start();
 }

@@ -1,12 +1,12 @@
 // Auth Mode: Open for networks with no passwords, WPA2 PSK with passwords
-#define LOCAL_BROKER_URL "mqtt://172.20.10.14:1884"
+#define LOCAL_BROKER_URL "mqtt://192.168.8.100:1884"
 #define PUBLIC_BROKER_URL "mqtt://test.mosquitto.org:1883"
 
 #include <stdio.h>
 #include <inttypes.h>
 #include "transport_mqtt.h"
 #include "mqtt_client.h"
-
+#include "esp_wifi.h"
 #include "message_router.h"
 
 esp_mqtt_client_handle_t client;
@@ -58,7 +58,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         // TODO: Subscribe to topics by changing "/topicName" that your device needs 
         // to subscribe to (Discuss what you want to call the topic when syncing up devices)
-        esp_mqtt_client_subscribe(client, "/als/occ", 1);
+        esp_mqtt_client_subscribe(client, "/als/occ/room/1", 1);
         
         break;
     case MQTT_EVENT_DISCONNECTED:
@@ -90,7 +90,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             This is where you might put stuff such as your subsystem demo logic
         */
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        // message_router_push_wire(event_info->data);
+        message_router_push_wire(event_info->data);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -110,8 +110,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 static void mqtt_app_start(void)
 {
+    esp_wifi_set_ps(WIFI_PS_NONE);
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = PUBLIC_BROKER_URL
+        .broker.address.uri = LOCAL_BROKER_URL
     };
 #if CONFIG_BROKER_URL_FROM_STDIN
     char line[128];

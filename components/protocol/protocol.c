@@ -4,57 +4,70 @@
 
 static const char *TAG = "PROTOCOL";
 
+static bool parse_occ_message(cJSON *root, OccMessage *out);
+static bool parse_occ_config_delay(cJSON *root, OccMessage *out);
+
 static bool get_string_ref(cJSON *obj, const char *key, const char** out);
 static bool get_u8(cJSON *obj, const char* key, uint8_t *out);
+static bool get_u16(cJSON *obj, const char* key, uint16_t *out);
 
-// bool parse_broker_message(const char* json, OccMessage *out) {
-//     if (!out) return false;
+bool parse_broker_message(const char* json, OccMessage *out) {
+    if (!out) return false;
 
-//     cJSON *root = cJSON_Parse(json);
-//    
-//     const char *device_from_message, *origin, *action_from_message;
+    bool ok = false;
 
-//     bool ok = false;
+    cJSON *root = cJSON_Parse(json);
+    if (!root) goto fail;
+   
+    const char *device_from_message, *origin, *action_from_message;
+    if (!get_string_ref(root, "origin", &origin)) goto fail;
+    if (!get_string_ref(root, "device", &device_from_message)) goto fail;
+    if (!get_string_ref(root, "action", &action_from_message)) goto fail;
+    
+    out->origin = origin_from_string(origin);
+    out->device = device_from_string(device_from_message);
+    out->action = occ_action_from_string(action_from_message);
+    
+    if (out->device != DEVICE_OCC_SENSOR) {
+        ESP_LOGI(TAG, "Wrong Device Type: %s", device_from_message);
+        goto fail;
+    }
+    
+    ok = parse_occ_message(root, out);
+    
+fail:
+    if (root) cJSON_Delete(root);
+    return ok;
+}
 
-//     if (!root) goto fail;
+static bool parse_occ_message(cJSON *root, OccMessage *out) {
+    const char *action;
+    if (!get_string_ref(root, "action", &action)) return false;
+    
+    out->action = occ_action_from_string(action);
+    
+    switch (out->action)
+    {
+        case OCC_CONFIG_DELAY:
+            return parse_occ_config_delay(root, out);
+            break;
+        default:
+            ESP_LOGE(TAG, "Action %u should not be parsed", OCC_CONFIG_DELAY);
+            return false;
+            break;
+    }
+    
+}
 
-//     if (!get_string_ref(root, "origin", &origin)) goto fail;
-//     if (!get_string_ref(root, "device", &device_from_message)) goto fail;
-//     if (!get_string_ref(root, "action", &action_from_message)) goto fail;
-//     
-//     out->origin = origin_from_string(origin);
-//     out->device = device_from_string(device_from_message);
-//     out->action = occ_action_from_string(action_from_message);
-//     
-//     if (out->device != DEVICE_OCC_SENSOR) {
-//         ESP_LOGI(TAG, "Wrong Device Type: %s", device_from_message);
-//         goto fail;
-//     }
-//     
-//     switch (out->device)
-//     {
-//         case DEVICE_APP:
-//             /* code */
-//             break;
-//         case DEVICE_LIGHT:
-//             ok = parse_light_message(root, out);
-//             /* code */
-//             break;
-//         case DEVICE_OCC_SENSOR:
-//             /* code */
-//             break;
-//         case DEVICE_UNKNOWN:
-//             ESP_LOGI(TAG, "Unknown Device Type: %s", device_from_message);
-//             break;
-//         default:
-//             break;
-//     }
-//     
-// fail:
-//     if (root) cJSON_Delete(root);
-//     return ok;
-// }
-
+static bool parse_occ_config_delay(cJSON *root, OccMessage *out) {
+    cJSON* payload = cJSON_GetObjectItem(root, "payload");
+    if (!cJSON_IsObject(payload)) return false;
+    
+    return get_u8(payload, "room_id",
+                    &out->payload.config_delay.room_id) &&
+           get_u16(payload, "off_delay",
+                    &out->payload.config_delay.off_delay);
+}
 
 // bool parse_app_message(cJSON *root, QueueMessage *out) {
 //     // Code here
@@ -145,6 +158,7 @@ DeviceType device_from_string(const char *s) {
 OccAction occ_action_from_string(const char *s) {
     if (!strcmp(s, "OCC_UPDATE")) return OCC_UPDATE;
     if (!strcmp(s, "HEARTBEAT_UPDATE")) return HEARTBEAT_UPDATE;
+    if (!strcmp(s, "OCC_CONFIG_DELAY")) return OCC_CONFIG_DELAY;
     return OCC_ACTION_UNKNOWN;
 }
 
@@ -190,10 +204,12 @@ const char* device_to_string(DeviceType device) {
 const char* occ_action_to_string(OccAction occ_action) {
     switch (occ_action)
     {
-        case OCC_UPDATE:
-            return "OCC_UPDATE";
         case HEARTBEAT_UPDATE:
             return "HEARTBEAT_UPDATE";
+        case OCC_UPDATE:
+            return "OCC_UPDATE";
+        case OCC_CONFIG_DELAY:
+            return "OCC_CONFIG_DELAY";
         default:
             return NULL;
     }
@@ -210,11 +226,22 @@ static bool get_u8(cJSON *obj, const char* key, uint8_t *out) {
    cJSON *item = cJSON_GetObjectItem(obj, key); 
    if (!cJSON_IsNumber(item)) return false;
 
-   double v = item->valuedouble;
-   if (v < 0 || v > 255) return false;
+   int v = item->valueint;
+   if (v < 0 || v > UINT8_MAX) return false;
    
    *out = (uint8_t)v;
    return true;
+}
+
+static bool get_u16(cJSON *obj, const char* key, uint16_t *out) {
+    cJSON *item = cJSON_GetObjectItem(obj, key);
+    if (!cJSON_IsNumber(item)) return false;
+
+    int v = item->valueint;
+    if (v < 0 || v > UINT16_MAX) return false;
+    
+    *out = (uint16_t)v;
+    return true;
 }
 
 static bool get_bool(cJSON *obj, const char* key, bool *out) {

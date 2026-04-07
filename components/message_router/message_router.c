@@ -16,16 +16,16 @@ void message_router_init(void) {
 /*
 Pushes string data to the wire
 */
-// bool message_router_push_wire(const char *json) {
-//     OccMessage msg;
-//     
-//     if(!parse_broker_message(json, &msg)) {
-//         ESP_LOGE(TAG, "Parse Failed");
-//         return false;
-//     }
+bool message_router_push_wire(const char *json) {
+    OccMessage msg;
+    
+    if(!parse_broker_message(json, &msg)) {
+        ESP_LOGE(TAG, "Parse Failed");
+        return false;
+    }
 
-//     return xQueueSend(message_queue, &msg, portMAX_DELAY);
-// }
+    return xQueueSend(message_queue, &msg, portMAX_DELAY);
+}
 
 /*
 Pushes OccMessage struct data to the wire

@@ -27,19 +27,24 @@ typedef enum {
 typedef enum {
     HEARTBEAT_UPDATE,
     OCC_UPDATE,
+    OCC_CONFIG_DELAY,
     OCC_ACTION_UNKNOWN
 } OccAction;
 
 typedef struct {
     union {
         struct {
-            bool occupied; 
             uint8_t room_id; 
+            bool occupied; 
         } occ_update;
         bool occupied; 
         struct {
             bool connected_to_broker; 
         } heartbeat_update;
+        struct {
+            uint16_t off_delay;
+            uint8_t room_id;
+        } config_delay;
     };
 } OccPayload;
 
@@ -53,10 +58,7 @@ typedef struct {
 /*
     Parsers
 */
-
-// bool parse_broker_message(const char* json, OccMessage *msg);
-// bool parse_app_message(cJSON *root, OccMessage *msg); // Unfinished
-// bool parse_light_message(cJSON *root, OccMessage *msg);
+bool parse_broker_message(const char* json, OccMessage *msg);
 
 /*
     serializers 

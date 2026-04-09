@@ -32,14 +32,14 @@ void occupancy_handle(const OccMessage *msg) {
             ESP_LOGD(TAG, "Payload:");
             ESP_LOGD(TAG, "  Room ID: %u", msg->payload.config_delay.room_id);
             ESP_LOGD(TAG, "  Off Delay: %u", msg->payload.config_delay.off_delay);
-            configure_off_delay(msg->payload.config_delay.off_delay);
             bool ok = false;
             int retries = 0;
-            while (!ok && retries < 5) {
-                ok = configure_off_delay(5);
+            while (!ok && retries < 10) {
+                ok = configure_off_delay(msg->payload.config_delay.off_delay);
                 retries++;
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
+            if (!ok) ESP_LOGE(TAG, "Failed to configure off delay after %d retries", retries);
 
             break;
 
@@ -129,7 +129,7 @@ static bool configure_off_delay(uint16_t off_delay) {
     len = uart_read_bytes(UART_NUM_1, config_parameters_data, RX_BUF_SIZE, 20 / portTICK_PERIOD_MS); // Message is read and the # of bytes is saved to variable len
     // Check that the correct message has been recieved (len = 19)
     if (len != ConfigBaseParameters_Response_Length) {
-        ESP_LOGE(TAG, "Config Base Length Does Not Match");
+        ESP_LOGW(TAG, "Config Base Length Does Not Match");
         return false;
     }
    

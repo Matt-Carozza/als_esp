@@ -138,6 +138,6 @@ void app_main(void)
     xTaskCreate(queue_task, "queue_task", 4096, NULL, 5, NULL);
     
     mqtt_transport_start();
-    // xTaskCreate(occ_task, "occ_task", 4096, NULL, 5, NULL);
+    xTaskCreate(occ_task, "occ_task", 4096, NULL, 5, NULL);
     xTaskCreate(heartbeat_task, "status_task", 4096, NULL, 4, NULL);
 }

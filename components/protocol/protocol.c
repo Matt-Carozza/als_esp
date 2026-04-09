@@ -4,120 +4,107 @@
 
 static const char *TAG = "PROTOCOL";
 
-static void serialize_app(cJSON* root, const QueueMessage *msg);
+// static void serialize_camera(cJSON* root, const QueueMessage *msg);
 
-static bool get_string(cJSON *obj, const char *key, const char** out);
+static bool get_string_ref(cJSON *obj, const char *key, const char** out);
 static bool get_u8(cJSON *obj, const char* key, uint8_t *out);
 
 
-bool parse_broker_message(const char* json, QueueMessage *out) {
-    if (!out) return false;
+// bool parse_broker_message(const char* json, QueueMessage *out) {
+//     if (!out) return false;
 
-    cJSON *root = cJSON_Parse(json);
-   
-    const char *device_from_message, *origin;
+//     cJSON *root = cJSON_Parse(json);
+//    
+//     const char *device_from_message, *origin;
 
-    bool ok = false;
+//     bool ok = false;
 
-    if (!root) goto fail;
+//     if (!root) goto fail;
 
-    if (!get_string(root, "origin", &origin)) goto fail;
-    if (!get_string(root, "device", &device_from_message)) goto fail;
-    
-    out->origin = origin_from_string(origin);
-    out->device = device_from_string(device_from_message);
-    
-    switch (out->device)
-    {
-        case DEVICE_APP:
-            /* code */
-            break;
-        case DEVICE_LIGHT:
-            ok = parse_light_message(root, out);
-            /* code */
-            break;
-        case DEVICE_OCC_SENSOR:
-            /* code */
-            break;
-        case DEVICE_UNKNOWN:
-            ESP_LOGI(TAG, "Unknown Device Type: %s", device_from_message);
-            break;
-        default:
-            break;
-    }
-    
-fail:
-    if (root) cJSON_Delete(root);
-    return ok;
-}
+//     if (!get_string(root, "origin", &origin)) goto fail;
+//     if (!get_string(root, "device", &device_from_message)) goto fail;
+//     
+//     out->origin = origin_from_string(origin);
+//     out->device = device_from_string(device_from_message);
+//     
+//     switch (out->device)
+//     {
+//         case DEVICE_APP:
+//             /* code */
+//             break;
+//         case DEVICE_LIGHT:
+//             ok = parse_light_message(root, out);
+//             /* code */
+//             break;
+//         case DEVICE_OCC_SENSOR:
+//             /* code */
+//             break;
+//         case DEVICE_UNKNOWN:
+//             ESP_LOGI(TAG, "Unknown Device Type: %s", device_from_message);
+//             break;
+//         default:
+//             break;
+//     }
+//     
+// fail:
+//     if (root) cJSON_Delete(root);
+//     return ok;
+// }
 
-
-bool parse_app_message(cJSON *root, QueueMessage *out) {
-    // Code here
-    bool ok = false;
-    return ok;
-}
-
-bool parse_light_message(cJSON *root, QueueMessage *out) {
-    const char *action;
-    if(!get_string(root, "action", &action)) return false;
-    
-    out->light.action = light_action_from_string(action);
-    
-    switch (out->light.action)
-    {
-        case LIGHT_SET:
-            /* code */
-            return parse_light_set(root, out); 
-            break;
-        case LIGHT_UNKNOWN:
-            ESP_LOGI(TAG, "Unknown light action: %s", action);
-            return false;
-            break;
-        default:
-            ESP_LOGI(TAG, "Unknown light action: %s", action);
-            return false;
-            break;
-    }
-}
-
-bool parse_light_set(cJSON *root, QueueMessage *out) {
-    cJSON *payload = cJSON_GetObjectItem(root, "payload");
-    if(!cJSON_IsObject(payload)) return false;
-
-    return get_u8(payload, "r", &out->light.payload.r)
-        && get_u8(payload, "g", &out->light.payload.g)
-        && get_u8(payload, "b", &out->light.payload.b);
-        
-    return true;
-}
-
-bool serialize_message(const QueueMessage *msg, char* out, size_t out_len) {
+bool serialize_message(const CameraMessage *msg, char* out, size_t out_len) {
+    if (!msg || !out || out_len == 0) return false;
     cJSON *root = cJSON_CreateObject();
     
-    cJSON_AddStringToObject(root, "origin", 
-                            origin_to_string(msg->origin));
-    cJSON_AddStringToObject(root, "device", 
-                            device_to_string(msg->device));
+    if (!cJSON_AddStringToObject(root, "origin", 
+            origin_to_string(msg->origin)) ||
+        !cJSON_AddStringToObject(root, "device", 
+            device_to_string(msg->device)) ||
+        !cJSON_AddStringToObject(root, "action", 
+            camera_action_to_string(msg->action))) {
+        cJSON_Delete(root);
+        return false;
+    }
     
-    switch (msg->device)
+    cJSON *payload = cJSON_CreateObject();
+    if (!payload) {
+        cJSON_Delete(root);
+        return false;
+    }
+    
+    bool ok = false;
+    
+    switch (msg->action)
     {
-        case DEVICE_MAIN:
+        case SEND_FRAME:
+            ok = cJSON_AddNumberToObject(payload, "room_id", msg->payload.room_id);
+            cJSON *pixel_arr = cJSON_CreateArray();
+            if (!pixel_arr) {
+                cJSON_Delete(root);
+                return false;
+            }
+            for (size_t i = 0; i < CAM_RESOLUTION; ++i) {
+                cJSON *pixel = cJSON_CreateNumber(msg->payload.pixel_data[i]);
+                if (!pixel) {
+                    cJSON_Delete(root);
+                    return false;
+                }
+                cJSON_AddItemToArray(pixel_arr, pixel);
+            }
+
+            ok = cJSON_AddItemToObject(payload, "pixels", pixel_arr);
             break;
-        case DEVICE_APP:
-            serialize_app(root, msg);
-            break;
-        case DEVICE_LIGHT:
-            break;
-        case DEVICE_OCC_SENSOR:
-            break;
-        case DEVICE_UNKNOWN:
-            cJSON_Delete(root);
-            return false;
         default:
             cJSON_Delete(root);
             return false;
     }
+    
+    if (!ok) {
+        cJSON_Delete(payload);
+        cJSON_Delete(root);
+        return false;
+    }
+    
+    cJSON_AddItemToObject(root, "payload", payload);
     
     char *tmp = cJSON_PrintUnformatted(root);
 
@@ -131,19 +118,7 @@ bool serialize_message(const QueueMessage *msg, char* out, size_t out_len) {
     
     free(tmp);
     cJSON_Delete(root);
-    
     return true;
-}
-
-static void serialize_app(cJSON* root, const QueueMessage *msg) {
-    cJSON_AddStringToObject(root, "action",
-                            app_action_to_string(msg->app.action)); 
-
-    cJSON *payload = cJSON_CreateObject();
-    cJSON_AddBoolToObject(payload, "connected_to_broker",
-                          msg->app.payload.connected_to_broker);
-    
-    cJSON_AddItemToObject(root, "payload", payload);
 }
 
 MessageOrigin origin_from_string(const char *s) {
@@ -152,6 +127,7 @@ MessageOrigin origin_from_string(const char *s) {
     if (!strcmp(s, "LIGHT")) return ORIGIN_LIGHT;
     if (!strcmp(s, "OCC")) return ORIGIN_OCC_SENSOR;
     if (!strcmp(s, "DAYLIGHT")) return ORIGIN_DAYLIGHT_SENSOR;
+    if (!strcmp(s, "ORIGIN_CAMERA")) return ORIGIN_CAMERA;
     return ORIGIN_UKNOWN;
 }
 
@@ -160,13 +136,8 @@ DeviceType device_from_string(const char *s) {
     if (!strcmp(s, "APP")) return DEVICE_APP;
     if (!strcmp(s, "LIGHT")) return DEVICE_LIGHT;
     if (!strcmp(s, "OCC")) return DEVICE_OCC_SENSOR;
-    if (!strcmp(s, "DAYLIGHT")) return DEVICE_DAYLIGHT_SENSOR;
+    if (!strcmp(s, "DEVICE_CAMERA")) return DEVICE_CAMERA;
     return DEVICE_UNKNOWN;
-}
-
-LightAction light_action_from_string(const char *s) {
-    if (!strcmp(s, "SET")) return LIGHT_SET;
-    return LIGHT_UNKNOWN;
 }
 
 const char* origin_to_string(MessageOrigin origin) {
@@ -182,10 +153,10 @@ const char* origin_to_string(MessageOrigin origin) {
             return "OCC";
         case ORIGIN_DAYLIGHT_SENSOR:
             return "DAYLIGHT";
-        case ORIGIN_UKNOWN:
-            return "UNKNOWN";
+        case ORIGIN_CAMERA:
+            return "CAMERA";
         default:
-            return "UNKNOWN";
+            return NULL;
     }
 }
 const char* device_to_string(DeviceType device) {
@@ -201,24 +172,24 @@ const char* device_to_string(DeviceType device) {
             return "OCC";
         case DEVICE_DAYLIGHT_SENSOR:
             return "DAYLIGHT";
-        case DEVICE_UNKNOWN:
-            return "UNKNOWN";
+        case DEVICE_CAMERA:
+            return "CAMERA";
         default:
-            return "UNKNOWN";
+            return NULL;
     }
 }
 
-const char* app_action_to_string(LightAction light_action) {
-    switch (light_action)
+const char* camera_action_to_string(CameraAction camera_action) {
+    switch (camera_action)
     {
-        case APP_STATUS:
-            return "STATUS";
+        case SEND_FRAME:
+            return "SEND_FRAME";
         default:
-            return "UNKNOWN";
+            return NULL;
     }
 }
 
-static bool get_string(cJSON *obj, const char *key, const char** out) {
+static bool get_string_ref(cJSON *obj, const char *key, const char** out) {
     cJSON *item = cJSON_GetObjectItem(obj, key);
     if (!cJSON_IsString(item)) return false;
     *out = item->valuestring;
@@ -229,8 +200,8 @@ static bool get_u8(cJSON *obj, const char* key, uint8_t *out) {
    cJSON *item = cJSON_GetObjectItem(obj, key); 
    if (!cJSON_IsNumber(item)) return false;
 
-   double v = item->valuedouble;
-   if (v < 0 || v > 255) return false;
+   double v = item->valueint;
+   if (v < 0 || v > UINT8_MAX) return false;
    
    *out = (uint8_t)v;
    return true;

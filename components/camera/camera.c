@@ -37,5 +37,5 @@ static void publish_message(const CameraMessage* msg, const char* topic) {
     }
     
     int msg_id = mqtt_transport_publish(topic, json_buf);
-    ESP_LOGI(TAG, "Published frame, msg_id=%d", msg_id);
+    //ESP_LOGI(TAG, "Published frame, msg_id=%d", msg_id);
 }

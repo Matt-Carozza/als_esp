@@ -91,7 +91,7 @@ static bool should_init_wifi(uint32_t average_voltage) {
                                     : (average_voltage - previous_voltage_sent);
 
 
-    if (daylight_buffer_get_count() < 6 || abs_voltage_diff < THRESHOLD_VOLTAGE)
+    if (daylight_buffer_get_count() < DAYLIGHT_BUFFER_SIZE || abs_voltage_diff < THRESHOLD_VOLTAGE)
         return false;
 
     return true;

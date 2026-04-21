@@ -54,9 +54,8 @@ void camera_task(void *pvParameters) {
 
     #pragma endregion
     #pragma region adjustable variables
-    float MinDetectionThreshold = 70.0;
-    float step_threshold = 5;
-    float MaxDetectionThreshold = MinDetectionThreshold + (step_threshold * 3); // 85
+    float OneDetectionThreshold = 70.0;
+    float TwoDetectionThreshold = 72.0;
     int scan_rate = 1; // sec
     #pragma endregion    
 
@@ -67,7 +66,7 @@ void camera_task(void *pvParameters) {
             .device = DEVICE_APP,
             .action = SEND_FRAME,
             .payload =  {
-                .room_id = 1
+                .room_id = 2
             }
         };
 
@@ -102,13 +101,13 @@ void camera_task(void *pvParameters) {
         // Convert temperature array from fahrenheit to int value
   
         for (int i = 0; i<64; i++){
-            if(fahrenheit_temp[i] >= (MaxDetectionThreshold)){ // > 85
+            if(fahrenheit_temp[i] >= (TwoDetectionThreshold)){ // > 90
                 msg.payload.pixel_data[i] = 2;
             }
-            else if(fahrenheit_temp[i] >= (MinDetectionThreshold + (step_threshold *2))){ // 80 < x < 85
+            else if(fahrenheit_temp[i] >= OneDetectionThreshold){ // 85 < x < 90
                 msg.payload.pixel_data[i] = 1;
             }
-            else{ // < 80
+            else{ // < 85
                 msg.payload.pixel_data[i] = 0;
             }
         }
@@ -145,7 +144,7 @@ void camera_task(void *pvParameters) {
         if (message_router_push_local(&msg) != pdPASS) { 
             ESP_LOGE("STATUS_TASK", "Failed to send message to queue");
         } 
-        vTaskDelay(pdMS_TO_TICKS(scan_rate*110));
+        vTaskDelay(pdMS_TO_TICKS(scan_rate*200));
     } 
 }
 

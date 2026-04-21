@@ -29,7 +29,7 @@ typedef enum {
 } AppAction;
 
 typedef enum {
-    LIGHT_SET,
+    LIGHT_SET_RGB,
     LIGHT_UNKNOWN 
 } LightAction;
 
@@ -37,6 +37,7 @@ typedef struct {
     uint8_t r;
     uint8_t g;
     uint8_t b;
+    uint8_t room_id;
 } LightPayload;
 
 typedef struct {

@@ -9,14 +9,99 @@
 #include "protocol.h"
 #include "mobile_app.h"
 
+#include <stdlib.h>
+#include "driver/ledc.h"
+#include "esp_log.h"
+
 // #include "string_type.h" PROB REMOVE
+
+#define LEDC_TIMER              LEDC_TIMER_0
+#define LEDC_MODE               LEDC_LOW_SPEED_MODE
+#define RLEDC_OUTPUT_IO          (17) // Define the output GPIO
+#define GLEDC_OUTPUT_IO          (16) // Define the output GPIO
+#define BLEDC_OUTPUT_IO          (5) // Define the output GPIO
+#define RLEDC_CHANNEL           LEDC_CHANNEL_0
+#define GLEDC_CHANNEL           LEDC_CHANNEL_1
+#define BLEDC_CHANNEL           LEDC_CHANNEL_2
+#define LEDC_DUTY_RES           LEDC_TIMER_8_BIT // Set duty resolution to 13 bits
+#define LEDC_DUTY               (128) // Set duty to 50%. (2 ** 13) * 50% = 4096
+#define LEDC_FREQUENCY          (1000) // Frequency in Hertz. Set frequency at 4 kHz
 
 void queue_task(void *pvParameters);
 void status_task(void *pvParameters);
 
 static const char *TAG = "APP_MAIN";
 
+uint8_t prevr = 0;
+uint8_t prevg = 0;
+uint8_t prevb = 0;
 
+static void ledc_init(void)
+{
+    // Prepare and then apply the LEDC PWM timer configuration
+    ledc_timer_config_t Rledc_timer = {
+        .speed_mode       = LEDC_MODE,
+        .duty_resolution  = LEDC_DUTY_RES,
+        .timer_num        = LEDC_TIMER,
+        .freq_hz          = LEDC_FREQUENCY,  // Set output frequency at 833.333 kHz
+        .clk_cfg          = LEDC_AUTO_CLK
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&Rledc_timer));
+
+    // Prepare and then apply the LEDC PWM channel configuration
+    ledc_channel_config_t Rledc_channel = {
+        .speed_mode     = LEDC_MODE,
+        .channel        = RLEDC_CHANNEL,
+        .timer_sel      = LEDC_TIMER,
+        .intr_type      = LEDC_INTR_DISABLE,
+        .gpio_num       = RLEDC_OUTPUT_IO,
+        .duty           = 0, 
+        .hpoint         = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&Rledc_channel));
+        // Prepare and then apply the LEDC PWM timer configuration
+    ledc_timer_config_t Gledc_timer = {
+        .speed_mode       = LEDC_MODE,
+        .duty_resolution  = LEDC_DUTY_RES,
+        .timer_num        = LEDC_TIMER,
+        .freq_hz          = LEDC_FREQUENCY,  // Set output frequency at 833.333 kHz
+        .clk_cfg          = LEDC_AUTO_CLK
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&Gledc_timer));
+
+    // Prepare and then apply the LEDC PWM channel configuration
+    ledc_channel_config_t Gledc_channel = {
+        .speed_mode     = LEDC_MODE,
+        .channel        = GLEDC_CHANNEL,
+        .timer_sel      = LEDC_TIMER,
+        .intr_type      = LEDC_INTR_DISABLE,
+        .gpio_num       = GLEDC_OUTPUT_IO,
+        .duty           = 0, 
+        .hpoint         = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&Gledc_channel));
+        // Prepare and then apply the LEDC PWM timer configuration
+    ledc_timer_config_t Bledc_timer = {
+        .speed_mode       = LEDC_MODE,
+        .duty_resolution  = LEDC_DUTY_RES,
+        .timer_num        = LEDC_TIMER,
+        .freq_hz          = LEDC_FREQUENCY,  // Set output frequency at 833.333 kHz
+        .clk_cfg          = LEDC_AUTO_CLK
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&Bledc_timer));
+
+    // Prepare and then apply the LEDC PWM channel configuration
+    ledc_channel_config_t Bledc_channel = {
+        .speed_mode     = LEDC_MODE,
+        .channel        = BLEDC_CHANNEL,
+        .timer_sel      = LEDC_TIMER,
+        .intr_type      = LEDC_INTR_DISABLE,
+        .gpio_num       = BLEDC_OUTPUT_IO,
+        .duty           = 0, 
+        .hpoint         = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&Bledc_channel));
+}
 
 void queue_task(void *pvParameters) {
     QueueMessage msg;
@@ -31,10 +116,66 @@ void queue_task(void *pvParameters) {
                     break;
                 case DEVICE_LIGHT:
                     // Check mqtt_transport.c to see how to go from wireless broker data --> queue task
+
                     uint8_t r = msg.light.payload.r;
                     uint8_t g = msg.light.payload.g;
                     uint8_t b = msg.light.payload.b;
                     ESP_LOGI(TAG, "%u %u %u", r, g, b);
+
+                    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, RLEDC_CHANNEL, r));
+                    ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, RLEDC_CHANNEL));
+
+                    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, GLEDC_CHANNEL, g));
+                    ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, GLEDC_CHANNEL));
+
+                    ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, BLEDC_CHANNEL, b));
+                    ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, BLEDC_CHANNEL));
+                    // while (prevr != r||prevg != g||prevb != b)
+                    // {
+                        // if (prevr<r)
+                        // {
+                        //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, RLEDC_CHANNEL, prevr));
+                        //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, RLEDC_CHANNEL));
+                        //     prevr = prevr+1;
+                        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+                        // }
+                        // else if (prevr>r)
+                        // {
+                        //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, RLEDC_CHANNEL, prevr));
+                        //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, RLEDC_CHANNEL));
+                        //     prevr = prevr-1;
+                        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+                        // }
+                        // if (prevg<g)
+                        // {
+                        //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, GLEDC_CHANNEL, prevg));
+                        //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, GLEDC_CHANNEL));
+                        //     prevg = prevg+1;
+                        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+                        // }
+                        // else if (prevg>g)
+                        // {
+                        //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, GLEDC_CHANNEL, prevg));
+                        //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, GLEDC_CHANNEL));
+                        //     prevg = prevg-1;
+                        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+                        // }
+                        // if (prevb<b)
+                        // {
+                        //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, BLEDC_CHANNEL, prevb));
+                        //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, BLEDC_CHANNEL));
+                        //     prevb = prevb+1;
+                        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+                        // }
+                        // else if (prevb>b)
+                        // {
+                        //     ESP_ERROR_CHECK(ledc_set_duty(LEDC_MODE, BLEDC_CHANNEL, prevb));
+                        //     ESP_ERROR_CHECK(ledc_update_duty(LEDC_MODE, BLEDC_CHANNEL));
+                        //     prevb = prevb-1;
+                        //     vTaskDelay(10 / portTICK_PERIOD_MS);
+                        // }
+                        printf("\nRGB values : %d, %d, %d\n", r, g, b);
+                    // }       
                     break;
                 case DEVICE_OCC_SENSOR:
                     break;
@@ -67,7 +208,7 @@ void queue_task(void *pvParameters) {
 void status_task(void *pvParameters) {
     while (1) {
         QueueMessage msg = {
-            .origin = ORIGIN_MAIN, // TODO: REPLACE WITH YOUR DEVICE 
+            .origin = ORIGIN_LIGHT,  
             .device = DEVICE_APP,
             .app = {
                 .action = APP_STATUS,
@@ -91,6 +232,7 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ledc_init();
     
     /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
      * Read "Establishing Wi-Fi or Ethernet Connection" section in

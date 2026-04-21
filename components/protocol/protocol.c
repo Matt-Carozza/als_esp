@@ -66,7 +66,7 @@ bool parse_light_message(cJSON *root, QueueMessage *out) {
     
     switch (out->light.action)
     {
-        case LIGHT_SET:
+        case LIGHT_SET_RGB:
             /* code */
             return parse_light_set(root, out); 
             break;
@@ -87,7 +87,8 @@ bool parse_light_set(cJSON *root, QueueMessage *out) {
 
     return get_u8(payload, "r", &out->light.payload.r)
         && get_u8(payload, "g", &out->light.payload.g)
-        && get_u8(payload, "b", &out->light.payload.b);
+        && get_u8(payload, "b", &out->light.payload.b)
+        && get_u8(payload, "room_id", &out->light.payload.room_id);
         
     return true;
 }
@@ -165,7 +166,7 @@ DeviceType device_from_string(const char *s) {
 }
 
 LightAction light_action_from_string(const char *s) {
-    if (!strcmp(s, "SET")) return LIGHT_SET;
+    if (!strcmp(s, "SET_RGB")) return LIGHT_SET_RGB;
     return LIGHT_UNKNOWN;
 }
 
